@@ -1,0 +1,212 @@
+package com.resatkarakaya.artbook;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+import android.Manifest;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteStatement;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.ImageDecoder;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.MediaStore;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+
+public class AddArtActivity extends AppCompatActivity {
+
+    Bitmap selectedImage;
+    ImageView imageView;
+    EditText artNameText,painterNameText,yearText;
+    Button button;
+    SQLiteDatabase db;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_add_art);
+
+        imageView = findViewById(R.id.imageView);
+        artNameText = findViewById(R.id.ArtNameText);
+        painterNameText = findViewById(R.id.PainterNameText);
+        yearText = findViewById(R.id.YearText);
+        button = findViewById(R.id.button);
+        db = this.openOrCreateDatabase("Arts",MODE_PRIVATE,null);
+
+        Intent intent = getIntent();
+        String info = intent.getStringExtra("info");
+
+        if(info.matches("new")){
+            artNameText.setText("");
+            painterNameText.setText("");
+            yearText.setText("");
+            button.setVisibility(View.VISIBLE); //Eklemek için girince butonu açık bıraktım
+
+            Bitmap selectImage = BitmapFactory.decodeResource(getApplicationContext().getResources(),R.drawable.image);
+            imageView.setImageBitmap(selectImage);
+        }
+        else{
+            int artId = intent.getIntExtra("artId",1);
+            button.setVisibility(View.INVISIBLE); //Bakmak için girilince butonu kapattım
+
+            try{
+
+                Cursor cursor = db.rawQuery("SELECT * FROM arts WHERE id = ?",new String[] {String.valueOf(artId)});
+
+                int artNameIx = cursor.getColumnIndex("artname");
+                int painterNameIx = cursor.getColumnIndex("paintername");
+                int yearIx = cursor.getColumnIndex("year");
+                int imageIx = cursor.getColumnIndex("image");
+
+
+                while (cursor.moveToNext()){
+                    artNameText.setText(cursor.getString(artNameIx));
+                    painterNameText.setText(cursor.getInt(painterNameIx));
+                    yearText.setText(cursor.getInt(yearIx));
+
+                    byte[] bytes = cursor.getBlob(imageIx);
+                    Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length);
+                    imageView.setImageBitmap(bitmap);
+                }
+
+                arrayAdapter.notifyDataSetChanged();
+
+                cursor.close();
+            }
+            catch (Exception e){
+                e.printStackTrace();
+            }
+            //finish();
+            Intent intent1 = new Intent(MainActivity.this,AddArtActivity.class);
+            intent1.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP); //Bütün aktiviteleri kapatmayı sağlar.
+            startActivity(intent1);
+        }
+    }
+
+    public void selectedImage(View view){
+
+        if(ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_DENIED){ //İzin istemek için API 23 sonrası için
+            ActivityCompat.requestPermissions(this,new String[] {Manifest.permission.READ_EXTERNAL_STORAGE},1); //izin kontrol etmek neyden izin isteniyor
+        }
+        else{
+            Intent intentToGallery = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+            //Dosyanın nerede kayıtlı olduğunu anlar.(Hafıza kartı veya Tel hafızası)
+
+            startActivityForResult(intentToGallery,2);//Yukarıdaki sorunun yanıtını verir
+
+        }
+
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        //İzin istendiğinde onaylayınca veya reddedince ne olacağı
+
+        if(requestCode == 1){
+            if(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
+                //grantresult içinde eleman var mı onu sorgular permission grated var demek bu yüzden yukarıdaki if aynısı oldu
+                Intent intentToGallery = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                //Dosyanın nerede kayıtlı olduğunu anlar.(Hafıza kartı veya Tel hafızası)
+
+                startActivityForResult(intentToGallery,2);//Yukarıdaki sorunun yanıtını verir
+            }
+        }
+        else{
+
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+
+        if(requestCode == 2 && resultCode == RESULT_OK && data != null){
+            //izin verildikten sonra galeri null değilse işleminin devamı
+            Uri imageData = data.getData();
+
+            try {
+                if(Build.VERSION.SDK_INT >= 28){
+                    //yeni metod sadece sınıflar farklı ImageDecoder daha modern daha yeni
+                    ImageDecoder.Source source = ImageDecoder.createSource(this.getContentResolver(),imageData);
+                    selectedImage = ImageDecoder.decodeBitmap(source);
+                    imageView.setImageBitmap(selectedImage);
+
+                }
+                else{
+                    //eski method
+                    selectedImage = MediaStore.Images.Media.getBitmap(this.getContentResolver(),imageData);
+                    imageView.setImageBitmap(selectedImage);
+                }
+
+
+            }
+            catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    public  void save(View view){
+        String artName = artNameText.getText().toString();
+        String painterName = painterNameText.getText().toString();
+        String year = yearText.getText().toString();
+
+        Bitmap smallImage = makeSmallerImage(selectedImage,300);
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        smallImage.compress(Bitmap.CompressFormat.PNG,50,outputStream);
+        byte[] byteArray = outputStream.toByteArray();
+
+        try {
+
+            db = this.openOrCreateDatabase("Arts",MODE_PRIVATE,null);
+            db.execSQL("CREATE TABLE IF NOT EXISTS arts (id INTEGER PRIMARY KEY,artname VARCHAR,paintername VARCHAR,year VARCHAR,image BLOB)");
+
+            String sqlString = "INSERT INTO arts(artname,paintername,year,image) VALUES (?,?,?,?)";
+            SQLiteStatement sqLiteStatement = db.compileStatement(sqlString);
+            sqLiteStatement.bindString(1,artName);
+            sqLiteStatement.bindString(2,painterName);
+            sqLiteStatement.bindString(3,year);
+            sqLiteStatement.bindBlob(4,byteArray);
+            sqLiteStatement.execute();
+
+        }
+        catch (Exception e){
+
+        }
+    }
+
+    public  Bitmap makeSmallerImage(Bitmap image,int maximumSize){
+        int width = image.getWidth();
+        int height = image.getHeight();
+
+        float bitmapRatio = (float) width / (float) height; //aynı oranı yakalayabilmek için küçülürken
+
+        if(bitmapRatio > 1){
+            width = maximumSize;
+            height = (int) (width / bitmapRatio);
+        }
+        else{
+            height = maximumSize;
+            width = (int) (height * bitmapRatio);
+        }
+        return Bitmap.createScaledBitmap(image,width,height,true);
+    }
+
+}
